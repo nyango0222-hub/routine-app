@@ -1084,7 +1084,7 @@ input[type="time"]::-webkit-date-and-time-value {
       </div>
       <div id="alreadyCompleted" class="already-completed" style="display:none;">
         本日の業務は完了しています
-        <span class="sub">明日になるとリセットされます</span>
+        <span class="sub">翌朝4時にリセットされます</span>
         <br>
         <button class="undo-btn" id="undoCompleteBtn">修正する</button>
       </div>
@@ -1270,28 +1270,37 @@ input[type="time"]::-webkit-date-and-time-value {
       .replace(/'/g, '&#39;');
   }
 
-  function getTodayKey() {
+  /* FIX: 営業日の切替時刻。0時〜この時刻までは前日扱いにする
+     （遅番が0時をまたいでもチェックが消えず、翌日分として記録されない） */
+  var DAY_CUTOFF_HOUR = 4;
+  function getBizDate() {
     var d = new Date();
+    if (d.getHours() < DAY_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+    return d;
+  }
+
+  function getTodayKey() {
+    var d = getBizDate();
     return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
   }
 
   function getTodayString() {
-    var d = new Date();
+    var d = getBizDate();
     return (d.getMonth() + 1) + '月' + d.getDate() + '日' +
            '<span class="weekday">' + DAY_NAMES[d.getDay()] + '曜日</span>';
   }
 
   function getTodayFullString() {
-    return new Date().toLocaleDateString('ja-JP', {
+    return getBizDate().toLocaleDateString('ja-JP', {
       year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
     });
   }
 
-  function getTodayDayName() { return DAY_NAMES[new Date().getDay()]; }
-  function getTodayDate() { return new Date().getDate(); }
+  function getTodayDayName() { return DAY_NAMES[getBizDate().getDay()]; }
+  function getTodayDate() { return getBizDate().getDate(); }
 
   function getLastDayOfMonth() {
-    var now = new Date();
+    var now = getBizDate();
     return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   }
 
@@ -1467,7 +1476,9 @@ input[type="time"]::-webkit-date-and-time-value {
   }
 
   function completeCheck() {
-    if (!canComplete()) return;
+    /* FIX: 完了演出中(1.5秒)の連打で履歴が二重登録されるのを防止 */
+    if (!canComplete() || isAlreadyCompleted()) return;
+    document.getElementById('completeBtn').disabled = true;
 
     var now = new Date();
     var visible = getVisibleItems();
@@ -1983,6 +1994,11 @@ input[type="time"]::-webkit-date-and-time-value {
       return;
     }
     if (date) days = [];
+    /* FIX: 曜日を全部外すと「毎日」扱いになっていたため入力を求める */
+    if (!date && days.length === 0) {
+      alert('曜日か特定日を選択してください');
+      return;
+    }
 
     if (!state.items[state.editingShift]) state.items[state.editingShift] = [];
 
@@ -2077,6 +2093,10 @@ input[type="time"]::-webkit-date-and-time-value {
       return;
     }
     if (date) days = [];
+    if (!date && days.length === 0) {
+      alert('曜日か特定日を選択してください');
+      return;
+    }
 
     var item = state.items[state.editingShift][state.editingIndex];
     item.text = text;
@@ -2489,6 +2509,39 @@ input[type="time"]::-webkit-date-and-time-value {
   }
 
   // ========================================
+  // 既存端末へのデータ更新（DEFAULT_ITEMSは初回起動時しか使われないため）
+  // ========================================
+  var DATA_VERSION = '2026.11.24';
+  var DATA_VERSION_KEY = 'routine_data_ver';
+  var ADDED_ID_PREFIX = 'id_muse1124_';              // 11/24追加：遅番の金券・現金
+  var REMOVED_IDS = ['id_mkw5e0gf_xs58rqi5k', 'id_mkw5e34h_hqnxbi4yy',
+                     'id_mkw5e61h_205117gg9', 'id_mkw5e8rh_li4aei7lj']; // 支社長にLINE報告
+
+  function migrateItems() {
+    if (localStorage.getItem(DATA_VERSION_KEY) === DATA_VERSION) return;
+
+    Object.keys(state.items).forEach(function(sid) {
+      state.items[sid] = state.items[sid].filter(function(it) {
+        return REMOVED_IDS.indexOf(it.id) === -1;
+      });
+    });
+
+    Object.keys(DEFAULT_ITEMS).forEach(function(sid) {
+      if (!state.items[sid]) return; // 端末側で消したシフトは復活させない
+      var have = {};
+      state.items[sid].forEach(function(it) { have[it.id] = true; });
+      DEFAULT_ITEMS[sid].forEach(function(it) {
+        if (it.id.indexOf(ADDED_ID_PREFIX) === 0 && !have[it.id]) {
+          state.items[sid].push(JSON.parse(JSON.stringify(it)));
+        }
+      });
+    });
+
+    saveToStorage(STORAGE_KEYS.items, state.items);
+    localStorage.setItem(DATA_VERSION_KEY, DATA_VERSION);
+  }
+
+  // ========================================
   // 初期化
   // ========================================
   function init() {
@@ -2503,6 +2556,7 @@ input[type="time"]::-webkit-date-and-time-value {
       saveToStorage(STORAGE_KEYS.shifts, state.shifts);
       saveToStorage(STORAGE_KEYS.items, state.items);
     }
+    migrateItems();
     state.todayChecks = loadFromStorage(STORAGE_KEYS.todayChecks, {});
     state.history = loadFromStorage(STORAGE_KEYS.history, []);
     state.currentShift = loadFromStorage(STORAGE_KEYS.currentShift, null);
