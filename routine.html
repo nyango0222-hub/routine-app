@@ -1405,6 +1405,27 @@ input[type="time"]::-webkit-date-and-time-value {
     }
 
     updateProgress();
+
+    /* チェックしたら下へ移動（少し待ってから並べ替えて、チェックの動きを見せる） */
+    setTimeout(sortChecklistDom, 300);
+  }
+
+  // 未チェックを上、チェック済みを下へ並べ替える（各グループ内は元の順序を維持）
+  function sortChecklistDom() {
+    var container = document.getElementById('checklist');
+    if (!container) return;
+    var order = {};
+    getVisibleItems().forEach(function(item, idx) { order[item.id] = idx; });
+    var els = Array.prototype.slice.call(container.querySelectorAll('.checklist-item'));
+    els.sort(function(a, b) {
+      var aId = a.getAttribute('data-id');
+      var bId = b.getAttribute('data-id');
+      var aChecked = isItemChecked(aId) ? 1 : 0;
+      var bChecked = isItemChecked(bId) ? 1 : 0;
+      if (aChecked !== bChecked) return aChecked - bChecked;
+      return (order[aId] || 0) - (order[bId] || 0);
+    });
+    els.forEach(function(el) { container.appendChild(el); });
   }
 
   function getVisibleItems() {
@@ -1586,6 +1607,7 @@ input[type="time"]::-webkit-date-and-time-value {
       container.appendChild(div);
     });
 
+    sortChecklistDom();
     updateCompletedState();
   }
 
